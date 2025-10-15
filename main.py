@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import ccxt
 import os
@@ -11,9 +11,8 @@ from pydantic import BaseModel
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
-API_TOKEN = os.getenv("API_TOKEN", "super_tajne_haslo_123")
+ACCESS_TOKEN = os.getenv("X_TOKEN")
 
-# --- Ustawienia strategii ---
 TRADE_SYMBOL = "BTC/USDT"
 SHORT_EMA = 50
 LONG_EMA = 200
@@ -28,14 +27,12 @@ MAX_CAPITAL_USAGE = 0.1
 bot_thread = None
 bot_running = False
 last_buy_price = None
+log = []
 
-log = []  # logi działań bota
+def check_token(x_token: str):
+    if x_token != ACCESS_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-def add_log(msg: str):
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    log.append(f"[{timestamp}] {msg}")
-
-# --- Bot logic ---
 def create_exchange():
     ex = ccxt.binance({
         'apiKey': API_KEY,
@@ -45,8 +42,8 @@ def create_exchange():
     ex.load_markets()
     return ex
 
-def fetch_ohlcv(exchange, symbol: str, timeframe='5m', limit=None):
-    return exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit or (LONG_EMA + 10))
+def fetch_ohlcv(exchange, symbol: str, timeframe='5m', limit=LONG_EMA + 10):
+    return exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
 
 def calculate_ema(prices_close: list, period: int):
     if len(prices_close) < period:
@@ -71,9 +68,9 @@ def calculate_rsi(prices_close: list, period: int):
     return rsi
 
 def bot_loop():
-    global bot_running, last_buy_price
+    global bot_running, last_buy_price, log
     ex = create_exchange()
-    add_log("Bot loop started")
+
     while bot_running:
         try:
             balance = ex.fetch_balance()
@@ -85,7 +82,9 @@ def bot_loop():
             rsi = calculate_rsi(closes, RSI_PERIOD)
             current_price = closes[-1]
 
-            add_log(f"Price: {current_price}, EMA_S: {ema_short}, EMA_L: {ema_long}, RSI: {rsi}")
+            status_msg = f"Price: {current_price}, EMA_S: {ema_short}, EMA_L: {ema_long}, RSI: {rsi}"
+            print(status_msg)
+            log.append(status_msg)
 
             if not last_buy_price:
                 if ema_short and ema_long and ema_short > ema_long and rsi > 50:
@@ -93,31 +92,29 @@ def bot_loop():
                     trade_amt = (free_usdt * MAX_CAPITAL_USAGE) / grid_price
                     ex.create_market_buy_order(TRADE_SYMBOL, trade_amt)
                     last_buy_price = grid_price
-                    add_log(f"BUY order placed at {grid_price}, qty={trade_amt}")
+                    msg = f"BUY at {grid_price} for {trade_amt}"
+                    print(msg)
+                    log.append(msg)
             else:
                 profit_pct = (current_price - last_buy_price) / last_buy_price
                 loss_pct = (last_buy_price - current_price) / last_buy_price
                 if profit_pct >= TAKE_PROFIT_PCT or loss_pct >= STOP_LOSS_PCT:
-                    position = ex.fetch_balance()['total'].get(TRADE_SYMBOL.split('/')[0], 0)
+                    position = ex.fetch_balance()['total'].get("BTC", 0)
                     ex.create_market_sell_order(TRADE_SYMBOL, position)
-                    add_log(f"SELL order placed at {current_price}, PnL: {profit_pct*100:.2f}%")
+                    msg = f"SELL at {current_price} with PnL: {profit_pct*100:.2f}%"
+                    print(msg)
+                    log.append(msg)
                     last_buy_price = None
 
         except Exception as e:
-            add_log(f"Bot ERROR: {str(e)}")
+            err = f"Bot ERROR: {str(e)}"
+            print(err)
+            log.append(err)
 
         time.sleep(SLEEP_INTERVAL)
-    add_log("Bot loop ended")
 
-# --- API + lifecycle ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global bot_thread, bot_running
-    # opcjonalnie możesz uruchamiać bota automatycznie przy starcie serwisu:
-    # if not bot_running:
-    #     bot_running = True
-    #     bot_thread = threading.Thread(target=bot_loop, daemon=True)
-    #     bot_thread.start()
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -134,80 +131,45 @@ app.add_middleware(
 def root():
     return {"message": "Bot działa globalnie na Render"}
 
-def check_token(x_token: str | None):
-    if x_token != API_TOKEN:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
 @app.post("/start_bot")
-def start_bot(x_token: str | None = Header(default=None)):
-    global bot_running, bot_thread
+def start_bot(x_token: str = Header(default=None)):
     check_token(x_token)
+    global bot_running, bot_thread
     if bot_running:
         return {"status": "already running"}
     bot_running = True
     bot_thread = threading.Thread(target=bot_loop, daemon=True)
     bot_thread.start()
-    add_log("API: /start_bot called")
     return {"status": "bot started"}
 
 @app.post("/stop_bot")
-def stop_bot(x_token: str | None = Header(default=None)):
-    global bot_running
+def stop_bot(x_token: str = Header(default=None)):
     check_token(x_token)
+    global bot_running
     bot_running = False
-    add_log("API: /stop_bot called")
     return {"status": "bot stopped"}
 
 @app.get("/status")
-def status(x_token: str | None = Header(default=None)):
+def status(x_token: str = Header(default=None)):
     check_token(x_token)
     return {"bot_running": bot_running}
 
 @app.get("/log")
-def get_log(x_token: str | None = Header(default=None)):
+def get_log(x_token: str = Header(default=None)):
     check_token(x_token)
-    return {"log": log[-100:]}  # ostatnie 100 wpisów
-
-@app.get("/balance")
-def get_balance(x_token: str | None = Header(default=None)):
-    check_token(x_token)
-    try:
-        ex = create_exchange()
-        balance = ex.fetch_balance()
-        return {
-            "total": balance.get("total", {}),
-            "free": balance.get("free", {}),
-            "used": balance.get("used", {})
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-@app.get("/positions")
-def get_positions(x_token: str | None = Header(default=None)):
-    check_token(x_token)
-    ex = create_exchange()
-    balance = ex.fetch_balance()
-    positions = {}
-    for symbol, amount in balance['total'].items():
-        if amount and amount > 0:
-            positions[symbol] = {
-                "total": balance['total'][symbol],
-                "free": balance['free'].get(symbol, 0),
-                "used": balance['used'].get(symbol, 0),
-            }
-    return positions
+    return {"log": log[-30:]}
 
 class ConfigUpdate(BaseModel):
-    symbol: str | None = None
-    short_ema: int | None = None
-    long_ema: int | None = None
-    rsi_period: int | None = None
-    take_profit_pct: float | None = None
-    stop_loss_pct: float | None = None
-    capital_usage: float | None = None
+    symbol: str = None
+    short_ema: int = None
+    long_ema: int = None
+    rsi_period: int = None
+    take_profit_pct: float = None
+    stop_loss_pct: float = None
+    capital_usage: float = None
 
 @app.post("/update_config")
-def update_config(cfg: ConfigUpdate, x_token: str | None = Header(default=None)):
+def update_config(cfg: ConfigUpdate, x_token: str = Header(default=None)):
     check_token(x_token)
     global TRADE_SYMBOL, SHORT_EMA, LONG_EMA, RSI_PERIOD, TAKE_PROFIT_PCT, STOP_LOSS_PCT, MAX_CAPITAL_USAGE
 
@@ -219,7 +181,6 @@ def update_config(cfg: ConfigUpdate, x_token: str | None = Header(default=None))
     if cfg.stop_loss_pct: STOP_LOSS_PCT = cfg.stop_loss_pct
     if cfg.capital_usage: MAX_CAPITAL_USAGE = cfg.capital_usage
 
-    add_log("API: /update_config called")
     return {
         "message": "Config updated",
         "new_config": {
