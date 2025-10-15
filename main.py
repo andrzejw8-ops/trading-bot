@@ -76,6 +76,7 @@ def bot_loop():
 
     while bot_running:
         try:
+            logs.append("Bot loop started")
             balance = ex.fetch_balance()
             free_usdt = balance['free'].get("USDT", 0)
             candles = fetch_ohlcv(ex, TRADE_SYMBOL)
