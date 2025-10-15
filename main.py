@@ -155,3 +155,51 @@ def get_balance():
         }
     except Exception as e:
         return {"error": str(e)}
+@app.get("/positions")
+def get_positions():
+    ex = create_exchange()
+    balance = ex.fetch_balance()
+    positions = {}
+    for symbol, amount in balance['total'].items():
+        if amount > 0:
+            positions[symbol] = {
+                "total": balance['total'][symbol],
+                "free": balance['free'].get(symbol, 0),
+                "used": balance['used'].get(symbol, 0),
+            }
+    return positions
+from pydantic import BaseModel
+
+class ConfigUpdate(BaseModel):
+    symbol: str = None
+    short_ema: int = None
+    long_ema: int = None
+    rsi_period: int = None
+    take_profit_pct: float = None
+    stop_loss_pct: float = None
+    capital_usage: float = None
+
+@app.post("/update_config")
+def update_config(cfg: ConfigUpdate):
+    global TRADE_SYMBOL, SHORT_EMA, LONG_EMA, RSI_PERIOD, TAKE_PROFIT_PCT, STOP_LOSS_PCT, MAX_CAPITAL_USAGE
+
+    if cfg.symbol: TRADE_SYMBOL = cfg.symbol
+    if cfg.short_ema: SHORT_EMA = cfg.short_ema
+    if cfg.long_ema: LONG_EMA = cfg.long_ema
+    if cfg.rsi_period: RSI_PERIOD = cfg.rsi_period
+    if cfg.take_profit_pct: TAKE_PROFIT_PCT = cfg.take_profit_pct
+    if cfg.stop_loss_pct: STOP_LOSS_PCT = cfg.stop_loss_pct
+    if cfg.capital_usage: MAX_CAPITAL_USAGE = cfg.capital_usage
+
+    return {
+        "message": "Config updated",
+        "new_config": {
+            "symbol": TRADE_SYMBOL,
+            "short_ema": SHORT_EMA,
+            "long_ema": LONG_EMA,
+            "rsi_period": RSI_PERIOD,
+            "take_profit_pct": TAKE_PROFIT_PCT,
+            "stop_loss_pct": STOP_LOSS_PCT,
+            "capital_usage": MAX_CAPITAL_USAGE,
+        }
+    }
