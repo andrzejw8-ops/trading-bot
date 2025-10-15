@@ -143,3 +143,15 @@ def stop_bot():
 @app.get("/status")
 def status():
     return {"bot_running": bot_running}
+@app.get("/balance")
+def get_balance():
+    try:
+        ex = create_exchange()
+        balance = ex.fetch_balance()
+        return {
+            "total": balance.get("total", {}),
+            "free": balance.get("free", {}),
+            "used": balance.get("used", {})
+        }
+    except Exception as e:
+        return {"error": str(e)}
