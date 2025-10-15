@@ -7,6 +7,9 @@ import time
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
+from collections import deque
+
+logs = deque(maxlen=50)  # maks. 50 ostatnich wpisów logów
 
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
@@ -84,7 +87,7 @@ def bot_loop():
 
             status_msg = f"Price: {current_price}, EMA_S: {ema_short}, EMA_L: {ema_long}, RSI: {rsi}"
             print(status_msg)
-            log.append(status_msg)
+            logs.append(status_msg)
 
             if not last_buy_price:
                 if ema_short and ema_long and ema_short > ema_long and rsi > 50:
@@ -94,7 +97,7 @@ def bot_loop():
                     last_buy_price = grid_price
                     msg = f"BUY at {grid_price} for {trade_amt}"
                     print(msg)
-                    log.append(msg)
+                    logs.append(msg)
             else:
                 profit_pct = (current_price - last_buy_price) / last_buy_price
                 loss_pct = (last_buy_price - current_price) / last_buy_price
@@ -103,7 +106,7 @@ def bot_loop():
                     ex.create_market_sell_order(TRADE_SYMBOL, position)
                     msg = f"SELL at {current_price} with PnL: {profit_pct*100:.2f}%"
                     print(msg)
-                    log.append(msg)
+                    logs.append(msg)
                     last_buy_price = None
 
         except Exception as e:
@@ -205,3 +208,6 @@ def get_balance():
         }
     except Exception as e:
         return {"error": str(e)}
+@app.get("/log")
+def get_logs():
+    return {"logs": list(logs)}
