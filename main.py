@@ -193,3 +193,15 @@ def update_config(cfg: ConfigUpdate, x_token: str = Header(default=None)):
             "capital_usage": MAX_CAPITAL_USAGE,
         }
     }
+@app.get("/balance")
+def get_balance():
+    try:
+        ex = create_exchange()
+        balance = ex.fetch_balance()
+        return {
+            "total": balance.get("total", {}),
+            "free": balance.get("free", {}),
+            "used": balance.get("used", {})
+        }
+    except Exception as e:
+        return {"error": str(e)}
