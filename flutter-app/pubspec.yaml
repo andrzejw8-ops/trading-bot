@@ -1,25 +1,26 @@
-
 name: trading_bot_mobile
-description: A mobile app to control your crypto trading bot.
-publish_to: 'none'
-
-version: 1.0.0+1
+description: Mobile app to control FastAPI crypto trading bot (Binance). PL/EN.
+publish_to: "none"
+version: 0.1.0+3
 
 environment:
-  sdk: '>=2.12.0 <3.0.0'
+  sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  http: ^0.13.3
+  cupertino_icons: ^1.0.6
+  http: ^1.2.2
+  flutter_secure_storage: ^9.2.2
+  intl: any
   flutter_localizations:
-    sdk: flutter
-
-dev_dependencies:
-  flutter_test:
     sdk: flutter
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/
+  generate: true
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
