@@ -9,14 +9,17 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from collections import deque
 
-logs = deque(maxlen=50)  # maks. 50 ostatnich wpisów logów
+# Maksymalnie 50 ostatnich wpisów logów
+logs = deque(maxlen=50)
 
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 ACCESS_TOKEN = os.getenv("X_TOKEN")
 
-TRADE_SYMBOL = "BTC/PLN" , "ETH/PLN" , 
+# Używamy jednego symbolu na start, można go później zaktualizować
+TRADE_SYMBOL = "BTC/PLN"
+
 SHORT_EMA = 50
 LONG_EMA = 200
 RSI_PERIOD = 14
@@ -30,7 +33,6 @@ MAX_CAPITAL_USAGE = 0.1
 bot_thread = None
 bot_running = False
 last_buy_price = None
-log = []
 
 def check_token(x_token: str):
     if x_token != ACCESS_TOKEN:
@@ -70,50 +72,57 @@ def calculate_rsi(prices_close: list, period: int):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+def get_base_currency(symbol):
+    return symbol.split('/')[0]
+
 def bot_loop():
-    global bot_running, last_buy_price, log
+    global bot_running, last_buy_price
     ex = create_exchange()
 
     while bot_running:
         try:
-            logs.append("Bot loop started")
+            logs.append("🔁 Bot loop started")
             balance = ex.fetch_balance()
-            free_usdt = balance['free'].get("USDT", 0)
+            free_fiat = balance['free'].get("PLN", 0)
+
             candles = fetch_ohlcv(ex, TRADE_SYMBOL)
             closes = [c[4] for c in candles]
+
             ema_short = calculate_ema(closes, SHORT_EMA)
             ema_long = calculate_ema(closes, LONG_EMA)
             rsi = calculate_rsi(closes, RSI_PERIOD)
             current_price = closes[-1]
 
-            status_msg = f"Price: {current_price}, EMA_S: {ema_short}, EMA_L: {ema_long}, RSI: {rsi}"
+            status_msg = f"📈 Price: {current_price}, EMA_S: {ema_short:.2f}, EMA_L: {ema_long:.2f}, RSI: {rsi:.2f}"
             print(status_msg)
             logs.append(status_msg)
 
             if not last_buy_price:
                 if ema_short and ema_long and ema_short > ema_long and rsi > 50:
                     grid_price = current_price * (1 - GRID_SPACING)
-                    trade_amt = (free_usdt * MAX_CAPITAL_USAGE) / grid_price
+                    trade_amt = (free_fiat * MAX_CAPITAL_USAGE) / grid_price
                     ex.create_market_buy_order(TRADE_SYMBOL, trade_amt)
                     last_buy_price = grid_price
-                    msg = f"BUY at {grid_price} for {trade_amt}"
+                    msg = f"✅ BUY at {grid_price:.2f} for {trade_amt:.6f}"
                     print(msg)
                     logs.append(msg)
             else:
                 profit_pct = (current_price - last_buy_price) / last_buy_price
                 loss_pct = (last_buy_price - current_price) / last_buy_price
+
                 if profit_pct >= TAKE_PROFIT_PCT or loss_pct >= STOP_LOSS_PCT:
-                    position = ex.fetch_balance()['total'].get("BTC", 0)
+                    base_currency = get_base_currency(TRADE_SYMBOL)
+                    position = ex.fetch_balance()['total'].get(base_currency, 0)
                     ex.create_market_sell_order(TRADE_SYMBOL, position)
-                    msg = f"SELL at {current_price} with PnL: {profit_pct*100:.2f}%"
+                    msg = f"🛑 SELL at {current_price:.2f} with PnL: {profit_pct*100:.2f}%"
                     print(msg)
                     logs.append(msg)
                     last_buy_price = None
 
         except Exception as e:
-            err = f"Bot ERROR: {str(e)}"
+            err = f"❌ Bot ERROR: {str(e)}"
             print(err)
-            log.append(err)
+            logs.append(err)
 
         time.sleep(SLEEP_INTERVAL)
 
@@ -159,9 +168,9 @@ def status(x_token: str = Header(default=None)):
     return {"bot_running": bot_running}
 
 @app.get("/log")
-def get_log(x_token: str = Header(default=None)):
+def get_logs(x_token: str = Header(default=None)):
     check_token(x_token)
-    return {"log": log[-30:]}
+    return {"logs": list(logs)}
 
 class ConfigUpdate(BaseModel):
     symbol: str = None
@@ -197,8 +206,10 @@ def update_config(cfg: ConfigUpdate, x_token: str = Header(default=None)):
             "capital_usage": MAX_CAPITAL_USAGE,
         }
     }
+
 @app.get("/balance")
-def get_balance():
+def get_balance(x_token: str = Header(default=None)):
+    check_token(x_token)
     try:
         ex = create_exchange()
         balance = ex.fetch_balance()
@@ -209,6 +220,3 @@ def get_balance():
         }
     except Exception as e:
         return {"error": str(e)}
-@app.get("/log")
-def get_logs():
-    return {"logs": list(logs)}
