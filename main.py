@@ -76,48 +76,64 @@ def get_base_currency(symbol):
     return symbol.split('/')[0]
 
 def bot_loop():
-    global bot_running, last_buy_price
+    global bot_running
     ex = create_exchange()
+
+    # Lista par do monitorowania
+    symbols = ["BTC/PLN", "ETH/PLN", "SOL/PLN"]
+
+    # Przechowujemy "last_buy_price" na podstawie obecnej ceny rynkowej na starcie
+    last_prices = {}
+
+    for symbol in symbols:
+        candles = fetch_ohlcv(ex, symbol)
+        closes = [c[4] for c in candles]
+        if closes:
+            last_prices[symbol] = closes[-1]  # przyjmujemy aktualną cenę jako cena zakupu
 
     while bot_running:
         try:
             logs.append("🔁 Bot loop started")
             balance = ex.fetch_balance()
-            free_fiat = balance['free'].get("PLN", 0)
 
-            candles = fetch_ohlcv(ex, TRADE_SYMBOL)
-            closes = [c[4] for c in candles]
+            for symbol in symbols:
+                candles = fetch_ohlcv(ex, symbol)
+                closes = [c[4] for c in candles]
+                if len(closes) < LONG_EMA:
+                    logs.append(f"⏳ Za mało danych dla {symbol}")
+                    continue
 
-            ema_short = calculate_ema(closes, SHORT_EMA)
-            ema_long = calculate_ema(closes, LONG_EMA)
-            rsi = calculate_rsi(closes, RSI_PERIOD)
-            current_price = closes[-1]
+                ema_short = calculate_ema(closes, SHORT_EMA)
+                ema_long = calculate_ema(closes, LONG_EMA)
+                rsi = calculate_rsi(closes, RSI_PERIOD)
+                current_price = closes[-1]
+                base_currency = symbol.split('/')[0]
+                position = balance['total'].get(base_currency, 0)
 
-            status_msg = f"📈 Price: {current_price}, EMA_S: {ema_short:.2f}, EMA_L: {ema_long:.2f}, RSI: {rsi:.2f}"
-            print(status_msg)
-            logs.append(status_msg)
+                status_msg = f"📊 {symbol} | Price: {current_price:.2f}, EMA_S: {ema_short:.2f}, EMA_L: {ema_long:.2f}, RSI: {rsi:.2f}, Qty: {position:.6f}"
+                print(status_msg)
+                logs.append(status_msg)
 
-            if not last_buy_price:
-                if ema_short and ema_long and ema_short > ema_long and rsi > 50:
-                    grid_price = current_price * (1 - GRID_SPACING)
-                    trade_amt = (free_fiat * MAX_CAPITAL_USAGE) / grid_price
-                    ex.create_market_buy_order(TRADE_SYMBOL, trade_amt)
-                    last_buy_price = grid_price
-                    msg = f"✅ BUY at {grid_price:.2f} for {trade_amt:.6f}"
-                    print(msg)
-                    logs.append(msg)
-            else:
-                profit_pct = (current_price - last_buy_price) / last_buy_price
-                loss_pct = (last_buy_price - current_price) / last_buy_price
+                if position > 0:
+                    last_buy_price = last_prices.get(symbol, current_price)
+                    profit_pct = (current_price - last_buy_price) / last_buy_price
+                    loss_pct = (last_buy_price - current_price) / last_buy_price
 
-                if profit_pct >= TAKE_PROFIT_PCT or loss_pct >= STOP_LOSS_PCT:
-                    base_currency = get_base_currency(TRADE_SYMBOL)
-                    position = ex.fetch_balance()['total'].get(base_currency, 0)
-                    ex.create_market_sell_order(TRADE_SYMBOL, position)
-                    msg = f"🛑 SELL at {current_price:.2f} with PnL: {profit_pct*100:.2f}%"
-                    print(msg)
-                    logs.append(msg)
-                    last_buy_price = None
+                    if profit_pct >= TAKE_PROFIT_PCT:
+                        ex.create_market_sell_order(symbol, position)
+                        logs.append(f"✅ SELL {symbol} z zyskiem {profit_pct*100:.2f}% @ {current_price:.2f}")
+                        last_prices[symbol] = current_price  # nowa cena wejścia, jeśli ponownie kupujemy w przyszłości
+
+                    elif loss_pct >= STOP_LOSS_PCT:
+                        ex.create_market_sell_order(symbol, position)
+                        logs.append(f"🛑 SELL {symbol} ze stratą {loss_pct*100:.2f}% @ {current_price:.2f}")
+                        last_prices[symbol] = current_price  # nowa cena wejścia
+
+                    else:
+                        logs.append(f"⏸️ {symbol} – brak decyzji handlowej (PnL: {profit_pct*100:.2f}%)")
+
+                else:
+                    logs.append(f"💤 {symbol} – brak pozycji, pomijam")
 
         except Exception as e:
             err = f"❌ Bot ERROR: {str(e)}"
@@ -125,6 +141,7 @@ def bot_loop():
             logs.append(err)
 
         time.sleep(SLEEP_INTERVAL)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
