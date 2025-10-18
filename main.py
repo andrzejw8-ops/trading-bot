@@ -17,7 +17,7 @@ API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 ACCESS_TOKEN = os.getenv("X_TOKEN")
 
-# Używamy jednego symbolu na start, można go później zaktualizować
+
 TRADE_SYMBOL = "BTC/PLN"
 
 SHORT_EMA = 50
