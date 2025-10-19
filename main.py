@@ -78,7 +78,7 @@ def get_base_currency(symbol):
 def bot_loop():
     global bot_running
     ex = create_exchange()
-    symbols = ["BTC/PLN", "ETH/PLN", "SOL/PLN"]
+    symbols = ["BTC/PLN", "ETH/PLN",]
     last_prices = {}
 
     # Ustawiamy "last_buy_price" na aktualnej cenie na start
