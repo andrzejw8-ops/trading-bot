@@ -18,7 +18,7 @@ API_SECRET = os.getenv("API_SECRET")
 ACCESS_TOKEN = os.getenv("X_TOKEN")
 
 
-TRADE_SYMBOL = "BTC/PLN"
+TRADE_SYMBOL = "BTC/USDC"
 
 SHORT_EMA = 50
 LONG_EMA = 200
@@ -78,7 +78,7 @@ def get_base_currency(symbol):
 def bot_loop():
     global bot_running
     ex = create_exchange()
-    symbol = "BTC/PLN" 
+    symbol = "BTC/USDC" 
     last_prices = {}
 
     # Inicjalna cena
@@ -143,15 +143,15 @@ def bot_loop():
                 else:
                     logs.append(f"💤 {symbol} – brak pozycji, sprawdzam warunki wejścia...")
                     if ema_short > ema_long and rsi and rsi < 70:
-                        pln_balance = balance['free'].get("PLN", 0)
-                        allocation = pln_balance * MAX_CAPITAL_USAGE
+                        usdc_balance = balance['free'].get("PLN", 0)
+                        allocation = usdc_balance * MAX_CAPITAL_USAGE
                         if allocation > 10:  # minimalny zakup BTC na ~10 PLN
                             amount_to_buy = allocation / current_price
                             ex.create_market_buy_order(symbol, amount_to_buy)
                             last_prices[symbol] = current_price
-                            logs.append(f"🟢 BUY {symbol} za {allocation:.2f} PLN @ {current_price:.2f}")
+                            logs.append(f"🟢 BUY {symbol} za {allocation:.2f} USDC @ {current_price:.2f}")
                         else:
-                            logs.append(f"❌ Zbyt mały kapitał na zakup ({allocation:.2f} PLN)")
+                            logs.append(f"❌ Zbyt mały kapitał na zakup ({allocation:.2f} USDC)")
 
             except Exception as e:
                 logs.append(f"❌ Błąd w przetwarzaniu {symbol}: {str(e)}")
