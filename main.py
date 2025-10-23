@@ -143,15 +143,32 @@ def bot_loop():
                 else:
                     logs.append(f"💤 {symbol} – brak pozycji, sprawdzam warunki wejścia...")
                     if ema_short > ema_long and rsi and rsi > 40:
-                        usdc_balance = balance['free'].get("USDC", 0)
-                        allocation = usdc_balance * MAX_CAPITAL_USAGE
-                        if allocation > 10:  # minimalny zakup BTC na ~10 USDC
-                            amount_to_buy = allocation / current_price
-                            ex.create_market_buy_order(symbol, amount_to_buy)
-                            last_prices[symbol] = current_price
-                            logs.append(f"🟢 BUY {symbol} za {allocation:.2f} USDC @ {current_price:.2f}")
-                        else:
-                            logs.append(f"❌ Zbyt mały kapitał na zakup ({allocation:.2f} USDC)")
+    usdc_balance = balance['free'].get("USDC", 0)
+    allocation = usdc_balance * MAX_CAPITAL_USAGE
+
+    try:
+        market_info = ex.markets[symbol]
+        min_notional = market_info['limits']['cost']['min']
+        lot_size_min = market_info['limits']['amount']['min']
+    except Exception as e:
+        logs.append(f"❌ Nie udało się pobrać limitów dla {symbol}: {str(e)}")
+        continue
+
+    if allocation >= min_notional:
+        amount_to_buy = allocation / current_price
+
+        if amount_to_buy >= lot_size_min:
+            try:
+                ex.create_market_buy_order(symbol, amount_to_buy)
+                last_prices[symbol] = current_price
+                logs.append(f"🟢 BUY {symbol} za {allocation:.2f} USDC @ {current_price:.2f}")
+            except Exception as e:
+                logs.append(f"❌ Błąd przy BUY {symbol}: {str(e)}")
+        else:
+            logs.append(f"❌ Ilość {amount_to_buy:.8f} < minimalna ({lot_size_min}) dla {symbol}")
+    else:
+        logs.append(f"❌ Kwota {allocation:.2f} < minimalna ({min_notional}) dla {symbol}")
+
 
             except Exception as e:
                 logs.append(f"❌ Błąd w przetwarzaniu {symbol}: {str(e)}")
