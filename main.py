@@ -142,10 +142,10 @@ def bot_loop():
                 # Nie mamy pozycji → sprawdzamy warunki zakupu
                 else:
                     logs.append(f"💤 {symbol} – brak pozycji, sprawdzam warunki wejścia...")
-                    if ema_short > ema_long and rsi and rsi < 70:
+                    if ema_short > ema_long and rsi and rsi > 40:
                         usdc_balance = balance['free'].get("USDC", 0)
                         allocation = usdc_balance * MAX_CAPITAL_USAGE
-                        if allocation > 10:  # minimalny zakup BTC na ~10 PLN
+                        if allocation > 10:  # minimalny zakup BTC na ~10 USDC
                             amount_to_buy = allocation / current_price
                             ex.create_market_buy_order(symbol, amount_to_buy)
                             last_prices[symbol] = current_price
