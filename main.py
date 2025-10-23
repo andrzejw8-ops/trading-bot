@@ -142,9 +142,9 @@ def bot_loop():
                 # Nie mamy pozycji → sprawdzamy warunki zakupu
                 else:
                     logs.append(f"💤 {symbol} – brak pozycji, sprawdzam warunki wejścia...")
-                   if ema_short > ema_long and rsi and rsi > 40:
-                   usdc_balance = balance['free'].get("USDC", 0)
-                  allocation = usdc_balance * MAX_CAPITAL_USAGE
+                  if ema_short > ema_long and rsi and rsi > 40:
+    usdc_balance = balance['free'].get("USDC", 0)
+    allocation = usdc_balance * MAX_CAPITAL_USAGE
 
     try:
         market_info = ex.markets[symbol]
@@ -168,6 +168,7 @@ def bot_loop():
             logs.append(f"❌ Ilość {amount_to_buy:.8f} < minimalna ({lot_size_min}) dla {symbol}")
     else:
         logs.append(f"❌ Kwota {allocation:.2f} < minimalna ({min_notional}) dla {symbol}")
+
 
 
 
