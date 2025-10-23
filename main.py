@@ -18,7 +18,7 @@ API_SECRET = os.getenv("API_SECRET")
 ACCESS_TOKEN = os.getenv("X_TOKEN")
 
 
-TRADE_SYMBOL = [ "BTC/USDC" , "SOL/USDC" ]
+TRADE_SYMBOL = ["BTC/USDC", "SOL/USDC", "ETH/USDC"]
 
 SHORT_EMA = 50
 LONG_EMA = 200
@@ -158,7 +158,7 @@ def bot_loop():
                 time.sleep(5)
 
             # ⏳ Odczekaj 10 minut, by nie dostać bana
-            time.sleep(600)
+            time.sleep(180)
 
         except Exception as e:
             logs.append(f"🔥 Błąd główny loopa: {str(e)}")
