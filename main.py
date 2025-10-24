@@ -23,12 +23,14 @@ LONG_EMA = 200
 RSI_PERIOD = 14
 STOP_LOSS_PCT = 0.015
 TAKE_PROFIT_PCT = 0.02
+TRAILING_STOP_PCT = 0.02  # Trailing stop 2%
 SLEEP_INTERVAL = 30
-MAX_CAPITAL_USAGE = 1.0  # 100% wolnych środków USDC
+MAX_CAPITAL_USAGE = 1.0
 
 bot_thread = None
 bot_running = False
 last_buy_price = {}
+trailing_max_price = {}
 
 def check_token(x_token: str):
     if x_token != ACCESS_TOKEN:
@@ -72,7 +74,7 @@ def get_base_currency(symbol):
     return symbol.split('/')[0]
 
 def bot_loop():
-    global bot_running, last_buy_price
+    global bot_running, last_buy_price, trailing_max_price
     ex = create_exchange()
 
     while bot_running:
@@ -102,20 +104,22 @@ def bot_loop():
                 logs.append(f"📊 {symbol} | Cena: {current_price:.2f}, EMA_S: {ema_short:.2f}, EMA_L: {ema_long:.2f}, RSI: {rsi:.2f}, Pozycja: {position:.6f}")
 
                 if position > 0:
-                    last_price = last_buy_price.get(symbol, current_price)
-                    profit_pct = (current_price - last_price) / last_price
-                    loss_pct = (last_price - current_price) / last_price
-
-                    if profit_pct >= TAKE_PROFIT_PCT:
-                        ex.create_market_sell_order(symbol, position)
-                        logs.append(f"✅ SELL {symbol} z zyskiem {profit_pct*100:.2f}% @ {current_price:.2f}")
-                        last_buy_price[symbol] = current_price
-                    elif loss_pct >= STOP_LOSS_PCT:
-                        ex.create_market_sell_order(symbol, position)
-                        logs.append(f"🛑 SELL {symbol} ze stratą {loss_pct*100:.2f}% @ {current_price:.2f}")
-                        last_buy_price[symbol] = current_price
+                    if symbol not in trailing_max_price:
+                        trailing_max_price[symbol] = current_price
                     else:
-                        logs.append(f"⏸️ Trzymam pozycję na {symbol}, PnL: {profit_pct*100:.2f}%")
+                        trailing_max_price[symbol] = max(trailing_max_price[symbol], current_price)
+
+                    trailing_drop = (trailing_max_price[symbol] - current_price) / trailing_max_price[symbol]
+
+                    if trailing_drop >= TRAILING_STOP_PCT:
+                        ex.create_market_sell_order(symbol, position)
+                        logs.append(f"🔻 Trailing STOP SELL {symbol} przy spadku {trailing_drop*100:.2f}% z max @ {current_price:.2f}")
+                        last_buy_price[symbol] = current_price
+                        trailing_max_price.pop(symbol, None)
+
+                    else:
+                        logs.append(f"⏸️ Pozycja otwarta – trailing: {trailing_drop*100:.2f}% od max")
+
                 else:
                     if ema_short > ema_long and rsi and rsi > 30:
                         try:
@@ -127,7 +131,7 @@ def bot_loop():
                             continue
 
                         if allocation < 10:
-                            logs.append(f"❌ Dostępne środki ({allocation:.2f} USDC) < minimalnego progu 10 USDC – pomijam zakup.")
+                            logs.append(f"❌ Dostępne środki ({allocation:.2f} USDC) < 10 USDC – pomijam zakup.")
                             continue
 
                         if allocation >= min_notional:
@@ -136,15 +140,16 @@ def bot_loop():
                                 try:
                                     ex.create_market_buy_order(symbol, amount_to_buy)
                                     last_buy_price[symbol] = current_price
+                                    trailing_max_price[symbol] = current_price
                                     logs.append(f"🟢 BUY {symbol} za {allocation:.2f} USDC @ {current_price:.2f}")
                                 except Exception as e:
                                     logs.append(f"❌ Błąd przy BUY {symbol}: {str(e)}")
                             else:
-                                logs.append(f"❌ Zbyt mała ilość {amount_to_buy:.8f} < minimalna ({lot_size_min}) dla {symbol}")
+                                logs.append(f"❌ Ilość {amount_to_buy:.8f} < min ({lot_size_min}) dla {symbol}")
                         else:
-                            logs.append(f"❌ Kwota {allocation:.2f} < minimalna ({min_notional}) dla {symbol}")
+                            logs.append(f"❌ Kwota {allocation:.2f} < min ({min_notional}) dla {symbol}")
             except Exception as e:
-                logs.append(f"🔥 Błąd w symbolu {symbol}: {str(e)}")
+                logs.append(f"🔥 Błąd {symbol}: {str(e)}")
         time.sleep(SLEEP_INTERVAL)
 
 @asynccontextmanager
@@ -163,7 +168,7 @@ app.add_middleware(
 
 @app.get("/")
 def root():
-    return {"message": "Bot działa globalnie na Render"}
+    return {"message": "Bot działa z trailing stopem"}
 
 @app.post("/start_bot")
 def start_bot(x_token: str = Header(default=None)):
@@ -242,4 +247,3 @@ def get_balance(x_token: str = Header(default=None)):
         }
     except Exception as e:
         return {"error": str(e)}
-
