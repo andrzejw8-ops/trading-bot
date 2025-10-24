@@ -23,7 +23,7 @@ LONG_EMA = 200
 RSI_PERIOD = 14
 STOP_LOSS_PCT = 0.015
 TAKE_PROFIT_PCT = 0.02
-TRAILING_STOP_PCT = 0.02  # Trailing stop 2%
+TRAILING_STOP_PCT = 0.02
 SLEEP_INTERVAL = 30
 MAX_CAPITAL_USAGE = 1.0
 
@@ -97,13 +97,13 @@ def bot_loop():
                 base_currency = get_base_currency(symbol)
 
                 balance = ex.fetch_balance()
-                position = balance['total'].get(base_currency, 0)
                 usdc_balance = balance['free'].get("USDC", 0)
                 allocation = usdc_balance * MAX_CAPITAL_USAGE
 
-                logs.append(f"📊 {symbol} | Cena: {current_price:.2f}, EMA_S: {ema_short:.2f}, EMA_L: {ema_long:.2f}, RSI: {rsi:.2f}, Pozycja: {position:.6f}")
+                logs.append(f"📊 {symbol} | Cena: {current_price:.2f}, EMA_S: {ema_short:.2f}, EMA_L: {ema_long:.2f}, RSI: {rsi:.2f}")
 
-                if position > 0:
+                if symbol in last_buy_price:
+                    position = balance['total'].get(base_currency, 0)
                     if symbol not in trailing_max_price:
                         trailing_max_price[symbol] = current_price
                     else:
@@ -114,9 +114,8 @@ def bot_loop():
                     if trailing_drop >= TRAILING_STOP_PCT:
                         ex.create_market_sell_order(symbol, position)
                         logs.append(f"🔻 Trailing STOP SELL {symbol} przy spadku {trailing_drop*100:.2f}% z max @ {current_price:.2f}")
-                        last_buy_price[symbol] = current_price
+                        last_buy_price.pop(symbol, None)
                         trailing_max_price.pop(symbol, None)
-
                     else:
                         logs.append(f"⏸️ Pozycja otwarta – trailing: {trailing_drop*100:.2f}% od max")
 
