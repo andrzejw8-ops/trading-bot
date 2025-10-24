@@ -143,8 +143,8 @@ def bot_loop():
                 else:
                     logs.append(f"💤 {symbol} – brak pozycji, sprawdzam warunki wejścia...")
                  if ema_short > ema_long and rsi and rsi > 40:
-                usdc_balance = balance['free'].get("USDC", 0)
-                allocation = usdc_balance * MAX_CAPITAL_USAGE
+                    usdc_balance = balance['free'].get("USDC", 0)
+                    allocation = usdc_balance * MAX_CAPITAL_USAGE
 
     try:
         market_info = ex.markets[symbol]
