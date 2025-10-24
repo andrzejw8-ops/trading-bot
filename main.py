@@ -24,7 +24,7 @@ RSI_PERIOD = 14
 STOP_LOSS_PCT = 0.015
 TAKE_PROFIT_PCT = 0.02
 SLEEP_INTERVAL = 30
-MAX_CAPITAL_USAGE = 0.1
+MAX_CAPITAL_USAGE = 1.0  # 100% wolnych środków USDC
 
 bot_thread = None
 bot_running = False
@@ -124,6 +124,10 @@ def bot_loop():
                             lot_size_min = market_info['limits']['amount']['min']
                         except Exception as e:
                             logs.append(f"❌ Nie udało się pobrać limitów dla {symbol}: {str(e)}")
+                            continue
+
+                        if allocation < 10:
+                            logs.append(f"❌ Dostępne środki ({allocation:.2f} USDC) < minimalnego progu 10 USDC – pomijam zakup.")
                             continue
 
                         if allocation >= min_notional:
