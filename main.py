@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from collections import deque
 
-# Maksymalnie 50 ostatnich wpisów logów
 logs = deque(maxlen=50)
 
 load_dotenv()
@@ -17,22 +16,19 @@ API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 ACCESS_TOKEN = os.getenv("X_TOKEN")
 
-
-TRADE_SYMBOL = ["BTC/USDC", "SOL/USDC", "ETH/USDC"]
+TRADE_SYMBOL = ["BTC/USDC", "ETH/USDC", "SOL/USDC"]
 
 SHORT_EMA = 50
 LONG_EMA = 200
 RSI_PERIOD = 14
-GRID_SPACING = 0.01
-GRID_LEVELS = 5
 STOP_LOSS_PCT = 0.015
 TAKE_PROFIT_PCT = 0.02
-SLEEP_INTERVAL = 60
+SLEEP_INTERVAL = 30
 MAX_CAPITAL_USAGE = 0.1
 
 bot_thread = None
 bot_running = False
-last_buy_price = None
+last_buy_price = {}
 
 def check_token(x_token: str):
     if x_token != ACCESS_TOKEN:
@@ -76,36 +72,18 @@ def get_base_currency(symbol):
     return symbol.split('/')[0]
 
 def bot_loop():
-    global bot_running
+    global bot_running, last_buy_price
     ex = create_exchange()
-    symbol = "BTC/USDC" 
-    last_prices = {}
-
-    # Inicjalna cena
-    try:
-        candles = fetch_ohlcv(ex, symbol, limit=LONG_EMA + 10)
-        closes = [c[4] for c in candles]
-        if closes:
-            last_prices[symbol] = closes[-1]
-            logs.append(f"🟢 Startowa cena dla {symbol}: {closes[-1]}")
-    except Exception as e:
-        logs.append(f"⚠️ Błąd inicjalizacji {symbol}: {str(e)}")
 
     while bot_running:
-        try:
-            logs.append("🔁 Bot loop started")
-
-            # 1. Saldo
+        symbols = TRADE_SYMBOL if isinstance(TRADE_SYMBOL, list) else [TRADE_SYMBOL]
+        for symbol in symbols:
             try:
-                balance = ex.fetch_balance()
-            except Exception as e:
-                logs.append(f"❌ Błąd fetch_balance(): {str(e)}")
-                time.sleep(60)
-                continue
+                logs.append(f"🔍 Sprawdzam parę {symbol}...")
 
-            try:
                 candles = fetch_ohlcv(ex, symbol, limit=LONG_EMA + 10)
                 closes = [c[4] for c in candles]
+
                 if len(closes) < LONG_EMA:
                     logs.append(f"⚠️ Zbyt mało danych dla {symbol}")
                     continue
@@ -115,76 +93,55 @@ def bot_loop():
                 rsi = calculate_rsi(closes, RSI_PERIOD)
                 current_price = closes[-1]
                 base_currency = get_base_currency(symbol)
+
+                balance = ex.fetch_balance()
                 position = balance['total'].get(base_currency, 0)
+                usdc_balance = balance['free'].get("USDC", 0)
+                allocation = usdc_balance * MAX_CAPITAL_USAGE
 
-                status_msg = f"📊 {symbol} | Cena: {current_price:.2f}, EMA_S: {ema_short:.2f}, EMA_L: {ema_long:.2f}, RSI: {rsi:.2f}, Ilość: {position:.6f}"
-                logs.append(status_msg)
+                logs.append(f"📊 {symbol} | Cena: {current_price:.2f}, EMA_S: {ema_short:.2f}, EMA_L: {ema_long:.2f}, RSI: {rsi:.2f}, Pozycja: {position:.6f}")
 
-                # Pozycja już otwarta → sprawdzamy TP / SL
                 if position > 0:
-                    last_buy_price = last_prices.get(symbol, current_price)
-                    profit_pct = (current_price - last_buy_price) / last_buy_price
-                    loss_pct = (last_buy_price - current_price) / last_buy_price
+                    last_price = last_buy_price.get(symbol, current_price)
+                    profit_pct = (current_price - last_price) / last_price
+                    loss_pct = (last_price - current_price) / last_price
 
                     if profit_pct >= TAKE_PROFIT_PCT:
                         ex.create_market_sell_order(symbol, position)
                         logs.append(f"✅ SELL {symbol} z zyskiem {profit_pct*100:.2f}% @ {current_price:.2f}")
-                        last_prices[symbol] = current_price
-
+                        last_buy_price[symbol] = current_price
                     elif loss_pct >= STOP_LOSS_PCT:
                         ex.create_market_sell_order(symbol, position)
                         logs.append(f"🛑 SELL {symbol} ze stratą {loss_pct*100:.2f}% @ {current_price:.2f}")
-                        last_prices[symbol] = current_price
-
+                        last_buy_price[symbol] = current_price
                     else:
-                        logs.append(f"⏸️ {symbol} – pozycja trzymana (PnL: {profit_pct*100:.2f}%)")
-
-                # Nie mamy pozycji → sprawdzamy warunki zakupu
+                        logs.append(f"⏸️ Trzymam pozycję na {symbol}, PnL: {profit_pct*100:.2f}%")
                 else:
-                    logs.append(f"💤 {symbol} – brak pozycji, sprawdzam warunki wejścia...")
-         if ema_short > ema_long and rsi and rsi > 40:
-                usdc_balance = balance['free'].get("USDC", 0)
-                allocation = usdc_balance * MAX_CAPITAL_USAGE
-
-                try:
-                    market_info = ex.markets[symbol]
-                    min_notional = market_info['limits']['cost']['min']
-                    lot_size_min = market_info['limits']['amount']['min']
-                except Exception as e:
-                    logs.append(f"❌ Nie udało się pobrać limitów dla {symbol}: {str(e)}")
-                    continue
-
-                if allocation >= min_notional:
-                    amount_to_buy = allocation / current_price
-
-                    if amount_to_buy >= lot_size_min:
+                    if ema_short > ema_long and rsi and rsi > 30:
                         try:
-                            ex.create_market_buy_order(symbol, amount_to_buy)
-                            last_prices[symbol] = current_price
-                            logs.append(f"🟢 BUY {symbol} za {allocation:.2f} USDC @ {current_price:.2f}")
+                            market_info = ex.markets[symbol]
+                            min_notional = market_info['limits']['cost']['min']
+                            lot_size_min = market_info['limits']['amount']['min']
                         except Exception as e:
-                            logs.append(f"❌ Błąd przy BUY {symbol}: {str(e)}")
-                    else:
-                        logs.append(f"❌ Ilość {amount_to_buy:.8f} < minimalna ({lot_size_min}) dla {symbol}")
-                else:
-                    logs.append(f"❌ Kwota {allocation:.2f} < minimalna ({min_notional}) dla {symbol}")
+                            logs.append(f"❌ Nie udało się pobrać limitów dla {symbol}: {str(e)}")
+                            continue
 
-
-
-
-
-
+                        if allocation >= min_notional:
+                            amount_to_buy = allocation / current_price
+                            if amount_to_buy >= lot_size_min:
+                                try:
+                                    ex.create_market_buy_order(symbol, amount_to_buy)
+                                    last_buy_price[symbol] = current_price
+                                    logs.append(f"🟢 BUY {symbol} za {allocation:.2f} USDC @ {current_price:.2f}")
+                                except Exception as e:
+                                    logs.append(f"❌ Błąd przy BUY {symbol}: {str(e)}")
+                            else:
+                                logs.append(f"❌ Zbyt mała ilość {amount_to_buy:.8f} < minimalna ({lot_size_min}) dla {symbol}")
+                        else:
+                            logs.append(f"❌ Kwota {allocation:.2f} < minimalna ({min_notional}) dla {symbol}")
             except Exception as e:
-                logs.append(f"❌ Błąd w przetwarzaniu {symbol}: {str(e)}")
-                time.sleep(5)
-
-            # ⏳ Odczekaj 10 minut, by nie dostać bana
-            time.sleep(180)
-
-        except Exception as e:
-            logs.append(f"🔥 Błąd główny loopa: {str(e)}")
-            time.sleep(60)
-
+                logs.append(f"🔥 Błąd w symbolu {symbol}: {str(e)}")
+        time.sleep(SLEEP_INTERVAL)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -246,7 +203,8 @@ def update_config(cfg: ConfigUpdate, x_token: str = Header(default=None)):
     check_token(x_token)
     global TRADE_SYMBOL, SHORT_EMA, LONG_EMA, RSI_PERIOD, TAKE_PROFIT_PCT, STOP_LOSS_PCT, MAX_CAPITAL_USAGE
 
-    if cfg.symbol: TRADE_SYMBOL = cfg.symbol
+    if cfg.symbol:
+        TRADE_SYMBOL = [cfg.symbol] if isinstance(cfg.symbol, str) else cfg.symbol
     if cfg.short_ema: SHORT_EMA = cfg.short_ema
     if cfg.long_ema: LONG_EMA = cfg.long_ema
     if cfg.rsi_period: RSI_PERIOD = cfg.rsi_period
@@ -280,3 +238,4 @@ def get_balance(x_token: str = Header(default=None)):
         }
     except Exception as e:
         return {"error": str(e)}
+
